@@ -1,180 +1,140 @@
-# AISecOps - Agent agentic sur les actions de sécurité opérationnelle
+# AISecOps - IA agentique appliquée à la sécurité opérationnelle
 
-Projet de recherche sur les modèles d'IA agentiques appliqués à la sécurité opérationnelle (OpSec).
-Sujet : Quelle est la pertinence de la mise en place d'un modèle d'IA de type agentique sur les actions de sécurité opérationnelle (OpSec) dans un environnement complexe
+Projet de recherche : **un agent LLM peut-il prendre en charge des actions de sécurité opérationnelle (SecOps) dans un environnement réaliste ?**
+
+L'agent reçoit une alerte, lit le contexte de l'infra, et **propose** une correction sous forme de pull request. Il ne merge jamais, il ne touche jamais la prod directement : c'est un humain qui valide (HITL).
 
 <table align="center">
-    <tr>
-      <th>Author</th>
-      <th>Author</th>
-    </tr>
-    <tr>
-      <td align="center">
-        <a href="https://github.com/nathanmartel21">
-          <img src="https://github.com/nathanmartel21.png?size=115" width="115" alt="@nathanmartel21" /><br />
-          <sub>@nathanmartel21</sub>
-        </a>
-        <br /><br />
-        <a href="https://github.com/sponsors/nathanmartel21">
-          <img src="https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=white" alt="Sponsor nathanmartel21" />
-        </a>
-      </td>
-      <td align="center">
-        <a href="https://github.com/Djegger">
-          <img src="https://github.com/Djegger.png?size=115" width="115" alt="@Djegger" /><br />
-          <sub>@Djegger</sub>
-        </a>
-        <br /><br />
-        <a href="https://github.com/sponsors/Djegger">
-          <img src="https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=white" alt="Sponsor Djegger" />
-        </a>
-      </td>
-    </tr>
-  </table>
-</div>
+  <tr><th>Author</th><th>Author</th></tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/nathanmartel21">
+        <img src="https://github.com/nathanmartel21.png?size=115" width="115" alt="@nathanmartel21" /><br />
+        <sub>@nathanmartel21</sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Djegger">
+        <img src="https://github.com/Djegger.png?size=115" width="115" alt="@Djegger" /><br />
+        <sub>@Djegger</sub>
+      </a>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## Stack technique :
+## Accès aux interfaces du lab
+
+Se connecter au VPN de l'école avant bien évidemment
+
+| Interface | Lien | Identifiants |
+|---|---|---|
+| **Console OpenShift** (pods, services, ingress) | https://console.159.31.247.120.nip.io:8443 | `openshift-infra/.console-auth` |
+| **ArgoCD** (GitOps) | https://argocd.159.31.247.120.nip.io:8443 | `admin` + secret `argocd-initial-admin-secret` |
+| **Wazuh** (SIEM) | https://wazuh.159.31.247.120.nip.io:8443 | `admin` + `WAZUH_INDEXER_PASSWORD` du `.env` |
+| **srv-web-01** (cible des attaques) | https://web.159.31.247.120.nip.io:8443 | aucun - site public simulé |
+| **NetBox** (CMDB) | http://localhost:8000 | local au VPS uniquement |
+
+Les autres serveurs du lab (DNS, mail, AD, base de données, bastion...) n'ont pas d'interface web : ce sont des cibles simulées. On les inspecte depuis la console OpenShift, ou en ligne de commande :
+
+```bash
+kubectl -n aisecops get pods
+kubectl -n aisecops logs deploy/srv-dns-01 -c bind9
+```
+
+Mot de passe ArgoCD :
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+Ou aller directement sur OKD (console) 
+
+---
+
+## Fonctionnement
+
+Le **pont** (`wazuh-bridge`) interroge l'indexer Wazuh toutes les 15 s, filtre le bruit, regroupe les alertes d'un même attaquant, puis lance l'agent dans un conteneur.
+
+L'agent a aujourd'hui **6 fonctions** au catalogue :
+
+| Fonction | Ce qu'elle fait | Risque |
+|---|---|---|
+| `remediation-config` | corrige un ConfigMap après une alerte → PR | modification |
+| `triage-alerte` | qualifie l'alerte (vrai/faux positif, escalade ?) | triage |
+| `audit-conformite` | audite le durcissement → PR de mise en conformité | modification |
+| `gestion-vuln` | rapport CVE priorisé (CMDB × CVSS) | lecture |
+| `rapport-incident` | rapport post-incident (timeline, MITRE) | lecture |
+| `hardening-proposer` | propose du durcissement sous forme de tickets | lecture |
+
+Si la situation est ambiguë ou le risque trop élevé, l'agent répond `alert_only` sans rien modifier
+
+---
+
+## Stack
 
 | Composant | Rôle | Version |
 |---|---|---|
-| [kind](https://kind.sigs.k8s.io/) | Cluster Kubernetes local (dans Docker) | v0.23.0 |
-| [kubectl](https://kubernetes.io/docs/tasks/tools/) | Client CLI Kubernetes | v1.36.1 |
-| [ArgoCD](https://argo-cd.readthedocs.io/) | Opérateur GitOps — synchronise Git → cluster | v2.11.0 |
-| [smolagents](https://github.com/huggingface/smolagents) | Framework agent LLM (HuggingFace) | latest |
-| Nvidia NIM | LLM inference (gpt-oss-120b) | API cloud |
-| GitHub | Hébergement des dépôts Git + PR | — |
-
-**Types d'attaque supportés :** `brute-force`, `ddos`, `scan`, `injection`, `exfiltration`
-
-Si l'agent estime que la situation est ambiguë ou que le risque de régression est trop élevé, il retourne `ACTION: ALERT_ONLY` sans créer de PR — c'est l'humain qui décide de la suite.
+| [kind](https://kind.sigs.k8s.io/) | cluster Kubernetes local | v0.23.0 / k8s 1.30 |
+| [ArgoCD](https://argo-cd.readthedocs.io/) | GitOps : Git → cluster | v2.11.0 |
+| [Wazuh](https://wazuh.com/) | SIEM (détection) | 4.13.1 |
+| [console OpenShift](https://github.com/openshift/console) | interface graphique du cluster | origin-console 4.15 |
+| [NetBox](https://netbox.dev/) | CMDB (criticité, dépendances, sources de confiance) | v4.4 |
+| [smolagents](https://github.com/huggingface/smolagents) | framework d'agent LLM | latest |
+| [Ollama](https://ollama.com/) | inférence on-prem (agent + juge) | qwen3-30b / aisecops-judge |
 
 ---
 
-## Prise en main complète (from scratch)
+<!-- ## Les dépôts
 
-> Suivre ces étapes dans l'ordre.
+**Le cœur**
+- [`agentic-secops-engine-interne`](https://github.com/AISecOpsLab/agentic-secops-engine-interne) - l'agent (LLM on-prem) + le juge
+- [`agentic-secops-engine`](https://github.com/AISecOpsLab/agentic-secops-engine) - même agent, variante LLM cloud
+- [`wazuh-bridge`](https://github.com/AISecOpsLab/wazuh-bridge) - le pont Wazuh → agent
 
-```bash
-mkdir AISecOps && cd AISecOps
-git clone git@github.com:AISecOpsLab/openshift-infra.git
-git clone git@github.com:AISecOpsLab/agentic-secops-engine.git
-git clone git@github.com:AISecOpsLab/cmdb.git
-git clone git@github.com:AISecOpsLab/openshift-configs.git
-git clone git@github.com:AISecOpsLab/conf-serveurs.git
-```
+**L'infra**
+- [`openshift-infra`](https://github.com/AISecOpsLab/openshift-infra) - scripts d'installation (kind, ArgoCD, Wazuh, ingress, console)
+- [`openshift-configs`](https://github.com/AISecOpsLab/openshift-configs) - dépôt GitOps, les ConfigMaps que l'agent modifie
+- [`cmdb`](https://github.com/AISecOpsLab/cmdb) / [`cmdb-netbox`](https://github.com/AISecOpsLab/cmdb-netbox) - la CMDB
+- [`conf-serveurs`](https://github.com/AISecOpsLab/conf-serveurs) - configs des serveurs simulés
 
-```bash
-cp .env.example .env
-```
+**Les connaissances de l'agent**
+- [`kb-remediation`](https://github.com/AISecOpsLab/kb-remediation) - playbooks (MITRE D3FEND/ATT&CK, OWASP)
+- [`kb-cti`](https://github.com/AISecOpsLab/kb-cti) - enrichissement CVE
 
-```bash
-mkdir -p ~/.local/bin
-# Installer kind (kube in docker) + kubectl
-curl -Lo ~/.local/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-chmod +x ~/.local/bin/kind
-KUBECTL_VERSION=$(curl -sL https://dl.k8s.io/release/stable.txt)
-curl -Lo ~/.local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-chmod +x ~/.local/bin/kubectl
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-kind version
-kubectl version --client --short 2>/dev/null || kubectl version --client
-```
+**L'évaluation**
+- [`ait-dataset`](https://github.com/AISecOpsLab/ait-dataset) - bancs de mesure sur le dataset AIT
+- [`judge-eval`](https://github.com/AISecOpsLab/judge-eval) - étalonnage du juge contre des annotations humaines
+- [`test-attaque`](https://github.com/AISecOpsLab/test-attaque) - scénarios d'attaque et tests d'injection de prompt
+
+**Archives** - [`test-code-agent`](https://github.com/AISecOpsLab/test-code-agent), [`test-tool-calling-agent`](https://github.com/AISecOpsLab/test-tool-calling-agent) : prototypes abandonnés, gardés pour documenter les choix. -->
+
+<!-- ---
+
+## Démarrer le lab
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r agentic-secops-engine/requirements.txt```
+git clone git@github.com:AISecOpsLab/lab-bootstrap.git && bash lab-bootstrap/install.sh
+cp .env.example .env        # puis remplir les clés
 ```
 
-créer le cluster kubernetes (kind) :
+Puis, dans l'ordre :
 
 ```bash
-bash openshift-infra/setup-kind.sh
-```
-```bash
-kubectl get nodes
-```
-
-installer ArgoCD
-
-```bash
-bash openshift-infra/install-argocd.sh
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d #mdp admin
+bash openshift-infra/setup-kind.sh       # cluster
+bash openshift-infra/install-argocd.sh   # GitOps
+bash openshift-infra/install-wazuh.sh    # SIEM
+bash openshift-infra/install-ingress.sh  # expose les UI
+bash openshift-infra/install-console.sh  # console OpenShift
+bash openshift-infra/install-bridge.sh   # le pont (conteneur permanent)
 ```
 
+Le détail de chaque brique est dans le README du dépôt correspondant. -->
 
+<!-- Lancer l'agent à la main, sans passer par le pont :
 
 ```bash
-kubectl get pods -n argocd
-kubectl get application aisecops -n argocd -o wide
-```
-
----
-
-config les credentials GitHub dans ArgoCD
-
-ArgoCD doit pouvoir lire le repo `openshift-configs` pour détecter les changements.
-
-```bash
-GITHUB_TOKEN=$(grep '^GITHUB_TOKEN=' .env | cut -d= -f2- | tr -d '"')
-
-kubectl create secret generic argocd-repo-openshift-configs \
-  -n argocd \
-  --from-literal=type=git \
-  --from-literal=url=https://github.com/AISecOpsLab/openshift-configs.git \
-  --from-literal=username=git \
-  --from-literal=password="$GITHUB_TOKEN"
-
-kubectl label secret argocd-repo-openshift-configs \
-  -n argocd \
-  argocd.argoproj.io/secret-type=repository
-
-kubectl rollout restart deployment argocd-repo-server -n argocd
-kubectl rollout status deployment argocd-repo-server -n argocd --timeout=60s
-```
-
-forcer argo à vérifier le repo immédiatement :
-
-```bash
-kubectl annotate application aisecops -n argocd \
-  argocd.argoproj.io/refresh=normal --overwrite
-sleep 15
-kubectl get application aisecops -n argocd -o wide
-```
-
-UI argo
-
-Dans un terminal séparé :
-
-```bash
-kubectl port-forward svc/argocd-server -n argocd 8888:443
-# login admin, mdp par la commande au dessus
-# kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-```
-
-Tester pipeline : 
-
-lancer une alerte de sécurité :
-
-```bash
-python3 agentic-secops-engine/run_agent.py '{
-  "type": "brute-force",
-  "source_ip": "198.51.100.42",
-  "target_host": "srv-web-01",
-  "port": 22,
-  "protocol": "ssh",
-  "timestamp": "2026-05-29T18:45:00Z",
-  "severity": "high",
-  "details": "487 tentatives de connexion SSH en 90 secondes sur port 22"
-}'
-```
-
-L'agent va :
-1. Lire la CMDB et le ConfigMap SSH de `srv-web-01`
-2. Identifier la remédiation (réduire `MaxAuthTries`)
-3. Créer une branche `fix/brute-force-srv-web-01-YYYYMMDD`
-4. Modifier le ConfigMap et le pousser sur GitHub
-5. Ouvrir une Pull Request
+echo '{"fonction":"triage-alerte","type":"scan","source_ip":"203.0.113.45","target_host":"srv-web-01","details":"balayage de ports"}' \
+  | python agentic-secops-engine-interne/run_agent.py
+``` -->
