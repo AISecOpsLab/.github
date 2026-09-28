@@ -5,7 +5,7 @@ Projet de recherche : **un agent LLM peut-il prendre en charge des actions de s√
 L'agent re√ßoit une alerte, lit le contexte de l'infra, et **propose** une correction sous forme de pull request. Il ne merge jamais, il ne touche jamais la prod directement : c'est un humain qui valide (HITL).
 
 <table align="center">
-  <tr><th>Author</th><th>Author</th></tr>
+  <tr><th>Author</th></tr>
   <tr>
     <td align="center">
       <a href="https://github.com/nathanmartel21">
