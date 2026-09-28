@@ -13,12 +13,6 @@ L'agent reçoit une alerte, lit le contexte de l'infra, et **propose** une corre
         <sub>@nathanmartel21</sub>
       </a>
     </td>
-    <td align="center">
-      <a href="https://github.com/Djegger">
-        <img src="https://github.com/Djegger.png?size=115" width="115" alt="@Djegger" /><br />
-        <sub>@Djegger</sub>
-      </a>
-    </td>
   </tr>
 </table>
 
@@ -33,6 +27,7 @@ Se connecter au VPN de l'école avant bien évidemment
 | **Console OpenShift** (pods, services, ingress) | https://console.159.31.247.120.nip.io:8443 | `openshift-infra/.console-auth` |
 | **ArgoCD** (GitOps) | https://argocd.159.31.247.120.nip.io:8443 | `admin` + secret `argocd-initial-admin-secret` |
 | **Wazuh** (SIEM) | https://wazuh.159.31.247.120.nip.io:8443 | `admin` + `WAZUH_INDEXER_PASSWORD` du `.env` |
+| **OpenWEBUI** | https://chat.159.31.247.120.nip.io:8443/ | `admin@aisecops.local` + secret `WEBUI_ADMIN_PASSWORD` |
 | **srv-web-01** (cible des attaques) | https://web.159.31.247.120.nip.io:8443 | aucun - site public simulé |
 | **NetBox** (CMDB) | http://localhost:8000 | local au VPS uniquement |
 
